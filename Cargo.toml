@@ -1,6 +1,6 @@
 [package]
 name = "rz-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Agent-to-agent messaging over Zellij panes — spawn, send, list, watch, and orchestrate LLM agents from the CLI"
