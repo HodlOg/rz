@@ -24,47 +24,72 @@ pub fn build(pane_id: &str, name: Option<&str>, rz_path: &str) -> Result<String>
         peers.push_str("  (none)\n");
     }
 
+    // Check if workspace exists.
+    let workspace = std::env::var("ZELLIJ_SESSION_NAME")
+        .ok()
+        .map(|s| format!("/tmp/rz-{s}"))
+        .filter(|p| std::path::Path::new(p).exists());
+
+    let workspace_section = if let Some(ref ws) = workspace {
+        format!(
+            r#"### Workspace
+
+A shared workspace is available at `{ws}/shared/`.
+Write large outputs (research, code drafts, logs) there instead of
+inlining them in messages. Reference the file path in your message, e.g.:
+`{rz_path} send 0 "findings at {ws}/shared/research.md"`
+"#
+        )
+    } else {
+        String::new()
+    };
+
     Ok(format!(
         r#"## Multi-Agent Environment
 
 You are agent "{identity}" (pane: {pane_id}) in a multi-agent Zellij session.
+
+You are **long-lived** — you will receive multiple tasks over time, not just one.
+After completing a task, report back and wait for the next one. Your context
+and knowledge accumulate across tasks, making you more valuable over time.
+Do not exit after finishing a task.
 
 ### Communication
 
 You have `rz` at `{rz_path}`. Use it to talk to other agents:
 
 ```bash
-# Send a message to another agent
+# Send a message to another agent (use just the number)
 {rz_path} send <pane_id> "your message"
 
-# Send raw text (no protocol envelope)
-{rz_path} send --raw <pane_id> "raw text"
+# Send and block until reply (timeout in seconds)
+{rz_path} send --wait 30 <pane_id> "question"
 
 # List all agents
 {rz_path} list
 
-# Read another agent's scrollback
-{rz_path} dump <pane_id>
+# Session overview with message counts
+{rz_path} status
 
-# Stream another agent's output in real-time
-{rz_path} watch <pane_id>
+# Read another agent's scrollback (last N lines)
+{rz_path} dump <pane_id> --last 50
 
-# Spawn a new agent
-{rz_path} spawn <command>
+# View protocol messages only
+{rz_path} log <pane_id>
 
 # Broadcast to all agents
 {rz_path} broadcast "message"
 ```
 
-### Active agents
+{workspace_section}### Active agents
 
 {peers}
 ### Protocol
 
 When you receive a message starting with `@@RZ:` it is a protocol envelope.
-The JSON inside has `from`, `kind`, and `ts` fields. Respond by using
-`{rz_path} send <from_pane_id> "your response"`.
+The JSON inside has `from`, `kind`, and `ts` fields. Reply with
+`{rz_path} send --ref <message_id> <from_pane_id> "your response"`.
 
-Plain text messages (no @@RZ: prefix) are direct human-style instructions."#
+Keep messages short. Use the workspace for large outputs."#
     ))
 }

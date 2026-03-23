@@ -30,6 +30,18 @@ enum Cmd {
     /// Print this pane's ID.
     Id,
 
+    /// Initialize a shared workspace for this session.
+    ///
+    /// Creates a directory at /tmp/rz-<session>/ with a shared/ folder
+    /// and prints the path. Agents can write files there instead of
+    /// sending large messages. Idempotent — safe to call multiple times.
+    Init,
+
+    /// Print the session workspace path.
+    ///
+    /// Fails if `rz init` hasn't been run yet.
+    Dir,
+
     /// Spawn an agent in a new pane with communication instructions.
     ///
     /// Creates a new Zellij pane, waits for it to start, then sends
@@ -71,6 +83,7 @@ enum Cmd {
     ///   rz send 3 "research this topic"
     ///   rz send --raw terminal_3 "ls -la"
     ///   rz send --ref abc123 terminal_3 "replying to your message"
+    ///   rz send --wait 30 3 "do this and reply"
     Send {
         /// Target pane ID (e.g. terminal_1, or just 1).
         pane: String,
@@ -85,6 +98,10 @@ enum Cmd {
         /// Reference a previous message ID (for threading).
         #[arg(long)]
         r#ref: Option<String>,
+        /// Block until a reply (with matching ref) arrives in own scrollback.
+        /// Value is timeout in seconds.
+        #[arg(long)]
+        wait: Option<u64>,
     },
 
     /// Broadcast a message to all other terminal panes.
@@ -201,6 +218,12 @@ fn rz_path() -> String {
         .unwrap_or_else(|_| "rz".into())
 }
 
+fn workspace_path() -> Result<std::path::PathBuf> {
+    let session = std::env::var("ZELLIJ_SESSION_NAME")
+        .map_err(|_| eyre::eyre!("ZELLIJ_SESSION_NAME not set — not inside zellij?"))?;
+    Ok(std::path::PathBuf::from(format!("/tmp/rz-{session}")))
+}
+
 fn sender_id(from: Option<&str>) -> String {
     from.map(String::from)
         .or_else(|| zellij::own_pane_id().ok())
@@ -213,6 +236,20 @@ fn main() -> Result<()> {
     match cli.command {
         Cmd::Id => {
             println!("{}", zellij::own_pane_id()?);
+        }
+
+        Cmd::Init => {
+            let ws = workspace_path()?;
+            std::fs::create_dir_all(ws.join("shared"))?;
+            println!("{}", ws.display());
+        }
+
+        Cmd::Dir => {
+            let ws = workspace_path()?;
+            if !ws.exists() {
+                bail!("workspace not initialized — run `rz init` first");
+            }
+            println!("{}", ws.display());
         }
 
         Cmd::Spawn {
@@ -262,10 +299,13 @@ fn main() -> Result<()> {
             println!("{pane_id}");
         }
 
-        Cmd::Send { pane, message, raw, from, r#ref } => {
+        Cmd::Send { pane, message, raw, from, r#ref, wait } => {
             let pane = zellij::normalize_pane_id(&pane);
             if raw {
                 zellij::send(&pane, &message)?;
+                if wait.is_some() {
+                    bail!("--wait requires protocol mode (cannot use with --raw)");
+                }
             } else {
                 let mut envelope = Envelope::new(
                     sender_id(from.as_deref()),
@@ -274,7 +314,28 @@ fn main() -> Result<()> {
                 if let Some(r) = r#ref {
                     envelope = envelope.with_ref(r);
                 }
+                let msg_id = envelope.id.clone();
                 zellij::send(&pane, &envelope.encode()?)?;
+
+                if let Some(timeout_secs) = wait {
+                    let own = zellij::own_pane_id()?;
+                    let deadline = std::time::Instant::now()
+                        + std::time::Duration::from_secs(timeout_secs);
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                        if std::time::Instant::now() >= deadline {
+                            bail!("timeout ({timeout_secs}s) — no reply to {msg_id}");
+                        }
+                        let scrollback = zellij::dump(&own)?;
+                        let messages = log::extract_messages(&scrollback);
+                        if let Some(reply) = messages.iter().rev().find(|m| {
+                            m.r#ref.as_deref() == Some(&msg_id)
+                        }) {
+                            println!("{}", log::format_message(reply));
+                            break;
+                        }
+                    }
+                }
             }
         }
 
