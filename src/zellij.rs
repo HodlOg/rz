@@ -1,0 +1,179 @@
+//! Thin wrapper over Zellij CLI commands.
+//!
+//! Uses `paste` for message delivery (with a short delay + `write 13` to
+//! trigger submission), `list-panes --json` for structured pane discovery,
+//! and `dump-screen` for reading pane output.
+
+use std::process::Command;
+
+use eyre::{Result, bail};
+use serde::Deserialize;
+
+// ---------------------------------------------------------------------------
+// Pane info
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct PaneInfo {
+    pub id: u64,
+    pub is_plugin: bool,
+    pub is_focused: bool,
+    pub is_floating: bool,
+    pub title: String,
+    #[serde(default)]
+    pub exited: bool,
+    #[serde(default)]
+    pub exit_status: Option<i32>,
+    #[serde(default)]
+    pub pane_command: Option<String>,
+    #[serde(default)]
+    pub pane_cwd: Option<String>,
+    #[serde(default)]
+    pub tab_id: Option<u64>,
+    #[serde(default)]
+    pub tab_name: Option<String>,
+}
+
+impl PaneInfo {
+    /// Full pane ID string (e.g. "terminal_3" or "plugin_1").
+    pub fn pane_id(&self) -> String {
+        let prefix = if self.is_plugin { "plugin" } else { "terminal" };
+        format!("{prefix}_{}", self.id)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Input
+// ---------------------------------------------------------------------------
+
+/// Send text to a pane and submit it.
+///
+/// Uses `paste` (bracketed paste mode) for the content, a short delay for
+/// the terminal to process the paste, then `write 13` (CR byte) to submit.
+pub fn send(pane_id: &str, text: &str) -> Result<()> {
+    zellij(&["action", "paste", "--pane-id", pane_id, text])?;
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    zellij(&["action", "write", "--pane-id", pane_id, "13"])?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Pane lifecycle
+// ---------------------------------------------------------------------------
+
+/// Spawn a command in a new pane. Returns the pane ID (e.g. "terminal_3").
+pub fn spawn(cmd: &str, args: &[&str], name: Option<&str>) -> Result<String> {
+    let mut cli_args = vec!["run"];
+    if let Some(n) = name {
+        cli_args.extend(["--name", n]);
+    }
+    cli_args.push("--");
+    cli_args.push(cmd);
+    cli_args.extend(args);
+
+    let output = Command::new("zellij").args(&cli_args).output()?;
+    if !output.status.success() {
+        bail!(
+            "zellij run failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Close a pane by ID.
+pub fn close(pane_id: &str) -> Result<()> {
+    zellij(&["action", "close-pane", "--pane-id", pane_id])
+}
+
+/// Rename a pane (appears on the pane frame).
+pub fn rename(pane_id: &str, name: &str) -> Result<()> {
+    zellij(&["action", "rename-pane", "--pane-id", pane_id, name])
+}
+
+/// Set a pane's foreground and/or background color.
+pub fn set_color(pane_id: &str, fg: Option<&str>, bg: Option<&str>) -> Result<()> {
+    let mut args = vec!["action", "set-pane-color", "--pane-id", pane_id];
+    if let Some(f) = fg {
+        args.extend(["--fg", f]);
+    }
+    if let Some(b) = bg {
+        args.extend(["--bg", b]);
+    }
+    zellij(&args)
+}
+
+/// Reset a pane's colors to terminal defaults.
+pub fn reset_color(pane_id: &str) -> Result<()> {
+    zellij(&["action", "set-pane-color", "--pane-id", pane_id, "--reset"])
+}
+
+// ---------------------------------------------------------------------------
+// Query
+// ---------------------------------------------------------------------------
+
+/// List all panes as structured data.
+pub fn list_panes() -> Result<Vec<PaneInfo>> {
+    let output = Command::new("zellij")
+        .args(["action", "list-panes", "--json"])
+        .output()?;
+    if !output.status.success() {
+        bail!(
+            "list-panes failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+/// List terminal pane IDs only (excludes plugins).
+pub fn list_pane_ids() -> Result<Vec<String>> {
+    Ok(list_panes()?
+        .into_iter()
+        .filter(|p| !p.is_plugin)
+        .map(|p| p.pane_id())
+        .collect())
+}
+
+/// Dump a pane's full scrollback.
+pub fn dump(pane_id: &str) -> Result<String> {
+    let output = Command::new("zellij")
+        .args(["action", "dump-screen", "--pane-id", pane_id, "--full"])
+        .output()?;
+    if !output.status.success() {
+        bail!(
+            "dump-screen failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// Get own pane ID from environment.
+pub fn own_pane_id() -> Result<String> {
+    std::env::var("ZELLIJ_PANE_ID")
+        .map(|id| {
+            if id.starts_with("terminal_") || id.starts_with("plugin_") {
+                id
+            } else {
+                format!("terminal_{id}")
+            }
+        })
+        .map_err(|_| eyre::eyre!("ZELLIJ_PANE_ID not set — not inside zellij?"))
+}
+
+// ---------------------------------------------------------------------------
+// Internal
+// ---------------------------------------------------------------------------
+
+fn zellij(args: &[&str]) -> Result<()> {
+    let output = Command::new("zellij").args(args).output()?;
+    if !output.status.success() {
+        bail!(
+            "zellij {} failed: {}",
+            args.first().unwrap_or(&""),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
