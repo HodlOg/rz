@@ -7,7 +7,7 @@ Spawn LLM agents (or any process) in Zellij panes and let them communicate direc
 ## Install
 
 ```bash
-cargo install zellij-rz
+cargo install rz-cli
 ```
 
 Requires [Zellij](https://zellij.dev) 0.44.0+.

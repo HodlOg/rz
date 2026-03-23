@@ -3,8 +3,8 @@
 use clap::{Parser, Subcommand};
 use eyre::{Result, bail};
 
-use zellij_rz::protocol::{Envelope, MessageKind};
-use zellij_rz::{bootstrap, zellij};
+use rz_cli::protocol::{Envelope, MessageKind};
+use rz_cli::{bootstrap, zellij};
 
 /// Agent-to-agent messaging over Zellij panes.
 ///
