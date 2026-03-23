@@ -135,6 +135,21 @@ pub fn list_pane_ids() -> Result<Vec<String>> {
         .collect())
 }
 
+/// Normalize a user-provided pane ID.
+///
+/// - `"3"` → `"terminal_3"`
+/// - `"terminal_3"` → `"terminal_3"` (passthrough)
+/// - `"plugin_1"` → `"plugin_1"` (passthrough)
+pub fn normalize_pane_id(input: &str) -> String {
+    if input.starts_with("terminal_") || input.starts_with("plugin_") {
+        input.to_string()
+    } else if input.chars().all(|c| c.is_ascii_digit()) {
+        format!("terminal_{input}")
+    } else {
+        input.to_string()
+    }
+}
+
 /// Dump a pane's full scrollback.
 pub fn dump(pane_id: &str) -> Result<String> {
     let output = Command::new("zellij")
@@ -149,16 +164,19 @@ pub fn dump(pane_id: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
+/// Dump a pane's scrollback, returning only the last `n` lines.
+pub fn dump_last(pane_id: &str, lines: usize) -> Result<String> {
+    let full = dump(pane_id)?;
+    let taken: Vec<&str> = full.lines().rev().take(lines).collect();
+    let mut taken = taken;
+    taken.reverse();
+    Ok(taken.join("\n"))
+}
+
 /// Get own pane ID from environment.
 pub fn own_pane_id() -> Result<String> {
     std::env::var("ZELLIJ_PANE_ID")
-        .map(|id| {
-            if id.starts_with("terminal_") || id.starts_with("plugin_") {
-                id
-            } else {
-                format!("terminal_{id}")
-            }
-        })
+        .map(|id| normalize_pane_id(&id))
         .map_err(|_| eyre::eyre!("ZELLIJ_PANE_ID not set — not inside zellij?"))
 }
 

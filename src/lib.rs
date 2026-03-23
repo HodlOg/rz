@@ -4,7 +4,9 @@
 //! messaging. No files, no sockets, no focus switching.
 
 pub mod bootstrap;
+pub mod log;
 pub mod protocol;
+pub mod status;
 pub mod zellij;
 
 pub use protocol::{Envelope, MessageKind, SENTINEL};

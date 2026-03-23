@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use eyre::{Result, bail};
 
 use rz_cli::protocol::{Envelope, MessageKind};
-use rz_cli::{bootstrap, zellij};
+use rz_cli::{bootstrap, log, status, zellij};
 
 /// Agent-to-agent messaging over Zellij panes.
 ///
@@ -68,9 +68,9 @@ enum Cmd {
     /// sender ID and timestamp. Use --raw for plain text.
     ///
     /// Examples:
-    ///   rz send terminal_3 "research this topic"
+    ///   rz send 3 "research this topic"
     ///   rz send --raw terminal_3 "ls -la"
-    ///   rz send --from orchestrator terminal_3 "do this"
+    ///   rz send --ref abc123 terminal_3 "replying to your message"
     Send {
         /// Target pane ID (e.g. terminal_1, or just 1).
         pane: String,
@@ -82,6 +82,9 @@ enum Cmd {
         /// Sender identity. Defaults to ZELLIJ_PANE_ID.
         #[arg(long)]
         from: Option<String>,
+        /// Reference a previous message ID (for threading).
+        #[arg(long)]
+        r#ref: Option<String>,
     },
 
     /// Broadcast a message to all other terminal panes.
@@ -96,10 +99,38 @@ enum Cmd {
     /// List all panes with their commands and status.
     List,
 
-    /// Dump a pane's full scrollback to stdout.
+    /// Show a summary of the session: pane counts and per-pane status.
+    ///
+    /// Includes message counts from each pane's scrollback.
+    Status,
+
+    /// Dump a pane's scrollback to stdout.
+    ///
+    /// Examples:
+    ///   rz dump 3              # full scrollback
+    ///   rz dump 3 --last 50    # last 50 lines only
     Dump {
         /// Target pane ID.
         pane: String,
+        /// Only show the last N lines.
+        #[arg(long)]
+        last: Option<usize>,
+    },
+
+    /// Show @@RZ: protocol messages from a pane's scrollback.
+    ///
+    /// Extracts and formats all protocol envelopes, filtering out
+    /// normal shell output.
+    ///
+    /// Examples:
+    ///   rz log 3
+    ///   rz log terminal_1 --last 10
+    Log {
+        /// Target pane ID.
+        pane: String,
+        /// Only show the last N messages.
+        #[arg(long)]
+        last: Option<usize>,
     },
 
     /// Stream a pane's output in real-time (uses zellij subscribe).
@@ -125,6 +156,22 @@ enum Cmd {
         pane: String,
         /// New name.
         name: String,
+    },
+
+    /// Ping a pane and measure round-trip time.
+    ///
+    /// Sends a Ping envelope and waits for a Pong reply (up to --timeout
+    /// seconds). Useful for checking if an agent is alive and responsive.
+    ///
+    /// Examples:
+    ///   rz ping 3
+    ///   rz ping terminal_1 --timeout 5
+    Ping {
+        /// Target pane ID.
+        pane: String,
+        /// Seconds to wait for a Pong reply.
+        #[arg(long, default_value = "3")]
+        timeout: u64,
     },
 
     /// Set a pane's color for visual identification.
@@ -188,7 +235,21 @@ fn main() -> Result<()> {
             }
 
             if !no_bootstrap {
-                std::thread::sleep(std::time::Duration::from_secs(wait));
+                // Poll until the pane has output (process started) or timeout.
+                let deadline = std::time::Instant::now()
+                    + std::time::Duration::from_secs(wait);
+                loop {
+                    if std::time::Instant::now() >= deadline {
+                        break;
+                    }
+                    if let Ok(out) = zellij::dump(&pane_id) {
+                        if !out.trim().is_empty() {
+                            break;
+                        }
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(500));
+                }
+
                 let msg = bootstrap::build(&pane_id, name.as_deref(), &rz_path())?;
                 zellij::send(&pane_id, &msg)?;
 
@@ -201,14 +262,18 @@ fn main() -> Result<()> {
             println!("{pane_id}");
         }
 
-        Cmd::Send { pane, message, raw, from } => {
+        Cmd::Send { pane, message, raw, from, r#ref } => {
+            let pane = zellij::normalize_pane_id(&pane);
             if raw {
                 zellij::send(&pane, &message)?;
             } else {
-                let envelope = Envelope::new(
+                let mut envelope = Envelope::new(
                     sender_id(from.as_deref()),
                     MessageKind::Chat { text: message },
                 );
+                if let Some(r) = r#ref {
+                    envelope = envelope.with_ref(r);
+                }
                 zellij::send(&pane, &envelope.encode()?)?;
             }
         }
@@ -239,8 +304,9 @@ fn main() -> Result<()> {
 
         Cmd::List => {
             let panes = zellij::list_panes()?;
-            println!("{:<14} {:<10} {:<20} {:<6} CWD",
-                "PANE_ID", "TAB", "COMMAND", "EXIT");
+            let own = zellij::own_pane_id().ok();
+            println!("{:<14} {:<16} {:<10} {:<20} {:<6} CWD",
+                "PANE_ID", "TITLE", "TAB", "COMMAND", "EXIT");
             for p in &panes {
                 if p.is_plugin {
                     continue;
@@ -248,6 +314,9 @@ fn main() -> Result<()> {
                 let cmd = p.pane_command.as_deref().unwrap_or("-");
                 let tab = p.tab_name.as_deref().unwrap_or("-");
                 let cwd = p.pane_cwd.as_deref().unwrap_or("-");
+                let pid = p.pane_id();
+                let marker = if own.as_deref() == Some(&pid) { " *" } else { "" };
+                let title = if p.title.is_empty() { "-" } else { &p.title };
                 let exit = if p.exited {
                     p.exit_status
                         .map(|c| c.to_string())
@@ -255,16 +324,42 @@ fn main() -> Result<()> {
                 } else {
                     "-".into()
                 };
-                println!("{:<14} {:<10} {:<20} {:<6} {}",
-                    p.pane_id(), tab, cmd, exit, cwd);
+                println!("{:<14} {:<16} {:<10} {:<20} {:<6} {}{}",
+                    pid, title, tab, cmd, exit, cwd, marker);
             }
         }
 
-        Cmd::Dump { pane } => {
-            print!("{}", zellij::dump(&pane)?);
+        Cmd::Status => {
+            let panes = zellij::list_panes()?;
+            let terminal_panes: Vec<_> = panes.into_iter().filter(|p| !p.is_plugin).collect();
+            let summary = status::summarize(&terminal_panes, |id| zellij::dump(id).ok());
+            print!("{}", status::format_summary(&summary));
+        }
+
+        Cmd::Dump { pane, last } => {
+            let pane = zellij::normalize_pane_id(&pane);
+            if let Some(n) = last {
+                print!("{}", zellij::dump_last(&pane, n)?);
+            } else {
+                print!("{}", zellij::dump(&pane)?);
+            }
+        }
+
+        Cmd::Log { pane, last } => {
+            let pane = zellij::normalize_pane_id(&pane);
+            let scrollback = zellij::dump(&pane)?;
+            let mut messages = log::extract_messages(&scrollback);
+            if let Some(n) = last {
+                let skip = messages.len().saturating_sub(n);
+                messages = messages.into_iter().skip(skip).collect();
+            }
+            for msg in &messages {
+                println!("{}", log::format_message(msg));
+            }
         }
 
         Cmd::Watch { pane, json } => {
+            let pane = zellij::normalize_pane_id(&pane);
             let mut args = vec!["subscribe".to_string(), "--pane-id".to_string(), pane];
             if json {
                 args.extend(["--format".to_string(), "json".to_string()]);
@@ -278,14 +373,47 @@ fn main() -> Result<()> {
         }
 
         Cmd::Close { pane } => {
+            let pane = zellij::normalize_pane_id(&pane);
             zellij::close(&pane)?;
         }
 
         Cmd::Rename { pane, name } => {
+            let pane = zellij::normalize_pane_id(&pane);
             zellij::rename(&pane, &name)?;
         }
 
+        Cmd::Ping { pane, timeout } => {
+            let pane = zellij::normalize_pane_id(&pane);
+            let from = sender_id(None);
+            let envelope = Envelope::new(&from, MessageKind::Ping);
+            let ping_id = envelope.id.clone();
+            let sent = std::time::Instant::now();
+
+            zellij::send(&pane, &envelope.encode()?)?;
+
+            let deadline = sent + std::time::Duration::from_secs(timeout);
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+                if std::time::Instant::now() >= deadline {
+                    println!("timeout ({timeout}s) — no pong from {pane}");
+                    std::process::exit(1);
+                }
+                let scrollback = zellij::dump(&pane)?;
+                let messages = log::extract_messages(&scrollback);
+                let got_pong = messages.iter().any(|m| {
+                    matches!(m.kind, MessageKind::Pong)
+                        && m.r#ref.as_deref() == Some(&ping_id)
+                });
+                if got_pong {
+                    let rtt = sent.elapsed();
+                    println!("pong from {pane} in {:.1}ms", rtt.as_secs_f64() * 1000.0);
+                    break;
+                }
+            }
+        }
+
         Cmd::Color { pane, fg, bg, reset } => {
+            let pane = zellij::normalize_pane_id(&pane);
             if reset {
                 zellij::reset_color(&pane)?;
             } else {

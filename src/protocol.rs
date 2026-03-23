@@ -50,6 +50,12 @@ impl Envelope {
         }
     }
 
+    /// Set the `ref` field (builder pattern).
+    pub fn with_ref(mut self, r: impl Into<String>) -> Self {
+        self.r#ref = Some(r.into());
+        self
+    }
+
     /// Encode to wire format: `@@RZ:<json>`
     pub fn encode(&self) -> eyre::Result<String> {
         let json = serde_json::to_string(self)?;
