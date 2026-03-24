@@ -124,6 +124,13 @@ impl AgentRegistry {
             is_floating: false,
         });
 
+        // Remove old name mapping if re-registering with a different name.
+        if let Some(ref old_name) = entry.name {
+            if *old_name != name {
+                self.name_index.remove(old_name);
+            }
+        }
+
         entry.name = Some(name.clone());
         entry.capabilities = capabilities;
         entry.registered = true;
@@ -159,7 +166,7 @@ impl AgentRegistry {
     // -- PaneUpdate reconciliation --------------------------------------------
 
     /// Reconcile the registry with a fresh PaneManifest from Zellij.
-    pub fn update_from_pane_manifest(&mut self, manifest: &PaneManifest, own_plugin_id: u32) {
+    pub fn update_from_pane_manifest(&mut self, manifest: &PaneManifest) {
         self.tick += 1;
         let current_tick = self.tick;
 
@@ -233,9 +240,6 @@ impl AgentRegistry {
         self.check_idle();
         self.prune_dead();
         self.rebuild_name_index();
-
-        // Suppress unused-variable warning.
-        let _ = own_plugin_id;
     }
 
     /// Record that a message was routed to/from this agent.
@@ -274,10 +278,6 @@ impl AgentRegistry {
     }
 
     // -- Queries --------------------------------------------------------------
-
-    pub fn get(&self, pane_id: u32) -> Option<&AgentEntry> {
-        self.agents.get(&pane_id)
-    }
 
     pub fn lookup_by_name(&self, name: &str) -> Option<&AgentEntry> {
         self.name_index

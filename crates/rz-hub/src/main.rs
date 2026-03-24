@@ -13,7 +13,6 @@ pub struct PendingTimer {
 
 struct RzHub {
     registry: registry::AgentRegistry,
-    plugin_id: u32,
     dirty: bool,
     timers: Vec<PendingTimer>,
     next_timer_id: u64,
@@ -23,7 +22,6 @@ impl Default for RzHub {
     fn default() -> Self {
         Self {
             registry: registry::AgentRegistry::default(),
-            plugin_id: 0,
             dirty: false,
             timers: Vec::new(),
             next_timer_id: 1,
@@ -47,9 +45,6 @@ impl ZellijPlugin for RzHub {
             EventType::Timer,
         ]);
 
-        let ids = get_plugin_ids();
-        self.plugin_id = ids.plugin_id;
-
         if configuration.get("visible").map(|v| v.as_str()) != Some("true") {
             hide_self();
         }
@@ -58,25 +53,16 @@ impl ZellijPlugin for RzHub {
     fn update(&mut self, event: Event) -> bool {
         match event {
             Event::PaneUpdate(manifest) => {
-                self.registry
-                    .update_from_pane_manifest(&manifest, self.plugin_id);
+                self.registry.update_from_pane_manifest(&manifest);
                 self.dirty = true;
             }
             Event::Timer(elapsed) => {
-                // Find the timer(s) whose delay matches the elapsed value.
-                // set_timeout fires with the exact seconds value we passed.
-                let elapsed_secs = elapsed as f64;
-                let mut fired = Vec::new();
-                self.timers.retain(|t| {
-                    if (t.seconds - elapsed_secs).abs() < 0.01 {
-                        fired.push((t.pane_id, t.label.clone()));
-                        false
-                    } else {
-                        true
-                    }
-                });
-                for (pane_id, label) in fired {
-                    router::deliver_timer(pane_id, &label);
+                // Match and remove only the FIRST timer with matching duration.
+                // Each set_timeout() produces its own Event::Timer, so we must
+                // consume exactly one PendingTimer per event.
+                if let Some(idx) = self.timers.iter().position(|t| (t.seconds - elapsed).abs() < 0.01) {
+                    let timer = self.timers.swap_remove(idx);
+                    router::deliver_timer(timer.pane_id, &timer.label);
                 }
             }
             Event::PermissionRequestResult(_) => {}

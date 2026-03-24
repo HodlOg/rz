@@ -188,10 +188,15 @@ pub fn own_pane_id() -> Result<String> {
 ///
 /// Uses `--name rz` without `--plugin` to target already-running instances
 /// (using `--plugin` launches a new instance each time).
+/// Percent-encode characters that conflict with the comma-separated key=value arg format.
+fn encode_arg_value(v: &str) -> String {
+    v.replace('%', "%25").replace(',', "%2C").replace('=', "%3D")
+}
+
 pub fn pipe_to_hub(action: &str, args: &[(&str, &str)], payload: Option<&str>) -> Result<String> {
     let mut parts = vec![action.to_string()];
     for (k, v) in args {
-        parts.push(format!("{k}={v}"));
+        parts.push(format!("{k}={}", encode_arg_value(v)));
     }
     let args_str = parts.join(",");
 

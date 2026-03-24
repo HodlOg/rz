@@ -251,6 +251,27 @@ fn sender_id(from: Option<&str>) -> String {
         .unwrap_or_else(|| "unknown".into())
 }
 
+/// Poll own scrollback for a reply referencing `msg_id`, with timeout.
+fn wait_for_reply(msg_id: &str, timeout_secs: u64) -> Result<()> {
+    let own = zellij::own_pane_id()?;
+    let deadline = std::time::Instant::now()
+        + std::time::Duration::from_secs(timeout_secs);
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(250));
+        if std::time::Instant::now() >= deadline {
+            bail!("timeout ({timeout_secs}s) — no reply to {msg_id}");
+        }
+        let scrollback = zellij::dump(&own)?;
+        let messages = log::extract_messages(&scrollback);
+        if let Some(reply) = messages.iter().rev().find(|m| {
+            m.r#ref.as_deref() == Some(msg_id)
+        }) {
+            println!("{}", log::format_message(reply));
+            return Ok(());
+        }
+    }
+}
+
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
@@ -358,11 +379,11 @@ Agents register here with their current task. Update when you start a new task.
         Cmd::Send { pane, message, raw, from, r#ref, wait } => {
             let pane = zellij::normalize_pane_id(&pane);
             if raw {
-                zellij::send(&pane, &message)?;
                 if wait.is_some() {
                     bail!("--wait requires protocol mode (cannot use with --raw)");
                 }
-            } else if !raw && zellij::hub_available() {
+                zellij::send(&pane, &message)?;
+            } else if zellij::hub_available() {
                 // Route through the hub plugin via zellij pipe.
                 let from = sender_id(from.as_deref());
                 let mut args = vec![("target", pane.as_str()), ("from", from.as_str())];
@@ -372,7 +393,6 @@ Agents register here with their current task. Update when you start a new task.
                 let resp = zellij::pipe_to_hub("action=send", &args, Some(&message))?;
 
                 if let Some(timeout_secs) = wait {
-                    // Hub response contains the assigned message ID.
                     let msg_id = serde_json::from_str::<serde_json::Value>(&resp)
                         .ok()
                         .and_then(|v| v.get("data")?.get("message_id")?.as_str().map(String::from))
@@ -380,23 +400,7 @@ Agents register here with their current task. Update when you start a new task.
                     if msg_id.is_empty() {
                         bail!("hub did not return a message_id");
                     }
-                    let own = zellij::own_pane_id()?;
-                    let deadline = std::time::Instant::now()
-                        + std::time::Duration::from_secs(timeout_secs);
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_millis(250));
-                        if std::time::Instant::now() >= deadline {
-                            bail!("timeout ({timeout_secs}s) — no reply to {msg_id}");
-                        }
-                        let scrollback = zellij::dump(&own)?;
-                        let messages = log::extract_messages(&scrollback);
-                        if let Some(reply) = messages.iter().rev().find(|m| {
-                            m.r#ref.as_deref() == Some(msg_id.as_str())
-                        }) {
-                            println!("{}", log::format_message(reply));
-                            break;
-                        }
-                    }
+                    wait_for_reply(&msg_id, timeout_secs)?;
                 }
             } else {
                 // Fallback: direct paste (no hub available).
@@ -411,23 +415,7 @@ Agents register here with their current task. Update when you start a new task.
                 zellij::send(&pane, &envelope.encode()?)?;
 
                 if let Some(timeout_secs) = wait {
-                    let own = zellij::own_pane_id()?;
-                    let deadline = std::time::Instant::now()
-                        + std::time::Duration::from_secs(timeout_secs);
-                    loop {
-                        std::thread::sleep(std::time::Duration::from_millis(250));
-                        if std::time::Instant::now() >= deadline {
-                            bail!("timeout ({timeout_secs}s) — no reply to {msg_id}");
-                        }
-                        let scrollback = zellij::dump(&own)?;
-                        let messages = log::extract_messages(&scrollback);
-                        if let Some(reply) = messages.iter().rev().find(|m| {
-                            m.r#ref.as_deref() == Some(&msg_id)
-                        }) {
-                            println!("{}", log::format_message(reply));
-                            break;
-                        }
-                    }
+                    wait_for_reply(&msg_id, timeout_secs)?;
                 }
             }
         }
@@ -553,6 +541,7 @@ Agents register here with their current task. Update when you start a new task.
 
         Cmd::Ping { pane, timeout } => {
             let pane = zellij::normalize_pane_id(&pane);
+            let own = zellij::own_pane_id()?;
             let from = sender_id(None);
             let envelope = Envelope::new(&from, MessageKind::Ping);
             let ping_id = envelope.id.clone();
@@ -567,7 +556,7 @@ Agents register here with their current task. Update when you start a new task.
                     println!("timeout ({timeout}s) — no pong from {pane}");
                     std::process::exit(1);
                 }
-                let scrollback = zellij::dump(&pane)?;
+                let scrollback = zellij::dump(&own)?;
                 let messages = log::extract_messages(&scrollback);
                 let got_pong = messages.iter().any(|m| {
                     matches!(m.kind, MessageKind::Pong)
