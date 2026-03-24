@@ -184,27 +184,19 @@ pub fn own_pane_id() -> Result<String> {
 // Hub (plugin pipe)
 // ---------------------------------------------------------------------------
 
-/// Resolve the hub plugin URL, expanding ~ to $HOME.
-fn hub_plugin_url() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
-    format!("file:{home}/.config/zellij/plugins/rz-hub.wasm")
-}
-
 /// Send a pipe message to the rz-hub plugin and return its JSON response.
 ///
-/// Runs: `zellij pipe --plugin <hub> --name rz --args 'k=v,...' -- 'payload'`
-/// The hub responds via `cli_pipe_output`, which becomes stdout here.
+/// Uses `--name rz` without `--plugin` to target already-running instances
+/// (using `--plugin` launches a new instance each time).
 pub fn pipe_to_hub(action: &str, args: &[(&str, &str)], payload: Option<&str>) -> Result<String> {
     let mut parts = vec![action.to_string()];
     for (k, v) in args {
         parts.push(format!("{k}={v}"));
     }
     let args_str = parts.join(",");
-    let plugin_url = hub_plugin_url();
 
     let mut cli_args = vec![
         "pipe",
-        "--plugin", &plugin_url,
         "--name", "rz",
         "--args", &args_str,
     ];

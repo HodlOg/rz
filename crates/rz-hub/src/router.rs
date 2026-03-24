@@ -310,7 +310,7 @@ fn deliver(envelope: &Envelope, target: PaneId) {
     // encode() can fail on serialization error, but our envelopes are simple
     // structs that always serialize successfully.
     if let Ok(wire) = envelope.encode() {
-        let bytes = format!("{wire}\n").into_bytes();
+        let bytes = format!("{wire}\r").into_bytes();
         write_to_pane_id(bytes, target);
     }
 }
