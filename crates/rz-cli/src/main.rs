@@ -290,10 +290,17 @@ fn main() -> Result<()> {
                 std::fs::write(&goals, "\
 # Session Goals
 
-What we're trying to accomplish this session.
-Agents: read this when starting, add sub-goals as you discover them.
+> Agents: read this file when you start. Add sub-goals as you discover them.
 
-- \n")?;
+## Goal
+_Fill in the session's primary objective._
+
+## Sub-goals
+-
+
+## Completed
+-
+")?;
             }
 
             let context = ws.join("context.md");
@@ -301,8 +308,14 @@ Agents: read this when starting, add sub-goals as you discover them.
                 std::fs::write(&context, "\
 # Session Context
 
-Decisions, discoveries, and important context logged by agents.
+> Agents: append here, never delete. Prefix entries with the date.
 
+## Decisions
+
+## Discoveries
+
+## Open Questions
+-
 ")?;
             }
 
@@ -311,10 +324,10 @@ Decisions, discoveries, and important context logged by agents.
                 std::fs::write(&agents, "\
 # Active Agents
 
-Agents register here with their current task. Update when you start a new task.
+> Agents: update your row when starting or finishing a task.
 
 | Pane | Name | Current Task | Status |
-|------|------|-------------|--------|
+|------|------|--------------|--------|
 ")?;
             }
 

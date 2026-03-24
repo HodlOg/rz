@@ -34,18 +34,13 @@ pub fn build(pane_id: &str, name: Option<&str>, rz_path: &str) -> Result<String>
         format!(
             r#"### Workspace
 
-A shared workspace is available at `{ws}/shared/`.
-Write large outputs (research, code drafts, logs) there instead of
-inlining them in messages. Reference the file path in your message, e.g.:
-`{rz_path} send 0 "findings at {ws}/shared/research.md"`
+Shared workspace: `{ws}/shared/` — write large outputs here, not in messages.
 
-### Project Files
+**Project files** (read these first, update as you work):
 
-The workspace has coordination files that all agents should use:
-
-- **`{ws}/goals.md`** — READ this when you start. It describes session goals. Add sub-goals as you discover them.
-- **`{ws}/context.md`** — UPDATE this with important decisions, discoveries, and context as you work.
-- **`{ws}/agents.md`** — UPDATE this with your pane ID, name, and current task when you start or switch tasks.
+- **`{ws}/goals.md`** — Session objectives. READ on start. Add sub-goals you discover.
+- **`{ws}/context.md`** — Decisions and discoveries. APPEND entries as you learn things others should know.
+- **`{ws}/agents.md`** — Who's doing what. UPDATE with your pane ID, name, and current task when you start or switch tasks.
 "#
         )
     } else {
@@ -73,6 +68,9 @@ You have `rz` at `{rz_path}`. Use it to talk to other agents:
 # Send and block until reply (timeout in seconds)
 {rz_path} send --wait 30 <pane_id> "question"
 
+# Reply to a specific message (threading)
+{rz_path} send --ref <message_id> <pane_id> "your response"
+
 # List all agents
 {rz_path} list
 
@@ -87,6 +85,9 @@ You have `rz` at `{rz_path}`. Use it to talk to other agents:
 
 # Broadcast to all agents
 {rz_path} broadcast "message"
+
+# Set a timer — you'll get an @@RZ: Timer message when it fires
+{rz_path} timer <seconds> "label"
 ```
 
 {workspace_section}### Active agents
@@ -98,6 +99,30 @@ When you receive a message starting with `@@RZ:` it is a protocol envelope.
 The JSON inside has `from`, `kind`, and `ts` fields. Reply with
 `{rz_path} send --ref <message_id> <from_pane_id> "your response"`.
 
-Keep messages short. Use the workspace for large outputs."#
+### Working patterns
+
+**Messages vs files.** Keep `rz send` messages short (status updates, questions,
+results). Write large outputs (research, code drafts, audit reports) to the
+workspace `shared/` directory and send the file path instead.
+
+**Parallel work.** When multiple agents edit code simultaneously, divide by
+**file** not by feature. Two agents editing the same file causes conflicts.
+Claim your files, finish, then hand off.
+
+**Spawning sub-agents.** You can spawn your own helpers for sub-tasks:
+`{rz_path} spawn --name subtask-name -p "focused task description" claude`
+Give sub-agents narrow scope. They report back to you; you report to your caller.
+
+**Situational awareness.** Run `{rz_path} status` or `{rz_path} list` to see
+who else is active. Check `{rz_path} log <pane_id>` to catch up on what
+another agent has been doing.
+
+**Timers.** Use `{rz_path} timer 300 "check build"` for periodic monitoring,
+build checks, or goal reviews. No polling — the hub wakes you up.
+
+**Audits and reviews.** Write findings to the workspace (`shared/audit-*.md`).
+Send a short summary via message with the file path. Do NOT fix code outside
+your assigned scope — report issues and let the responsible agent fix them.
+This prevents merge conflicts and respects file ownership."#
     ))
 }
