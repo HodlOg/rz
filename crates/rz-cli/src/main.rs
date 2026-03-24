@@ -210,6 +210,27 @@ enum Cmd {
         #[arg(long)]
         reset: bool,
     },
+
+    /// Set a timer — hub delivers @@RZ: Timer message when it fires.
+    ///
+    /// Tickless: no polling. The hub calls set_timeout() and wakes you
+    /// up with a Timer envelope when it expires.
+    ///
+    /// Examples:
+    ///   rz timer 30 "check build"     # 30s timer with label
+    ///   rz timer 5                     # 5s timer, empty label
+    ///   rz timer --cancel 3            # cancel timer with id 3
+    Timer {
+        /// Delay in seconds.
+        #[arg(required_unless_present = "cancel")]
+        seconds: Option<f64>,
+        /// Timer label (delivered in the Timer message).
+        #[arg(default_value = "")]
+        label: String,
+        /// Cancel a pending timer by ID.
+        #[arg(long)]
+        cancel: Option<u64>,
+    },
 }
 
 fn rz_path() -> String {
@@ -241,6 +262,41 @@ fn main() -> Result<()> {
         Cmd::Init => {
             let ws = workspace_path()?;
             std::fs::create_dir_all(ws.join("shared"))?;
+
+            // Create project coordination files (idempotent — don't overwrite).
+            let goals = ws.join("goals.md");
+            if !goals.exists() {
+                std::fs::write(&goals, "\
+# Session Goals
+
+What we're trying to accomplish this session.
+Agents: read this when starting, add sub-goals as you discover them.
+
+- \n")?;
+            }
+
+            let context = ws.join("context.md");
+            if !context.exists() {
+                std::fs::write(&context, "\
+# Session Context
+
+Decisions, discoveries, and important context logged by agents.
+
+")?;
+            }
+
+            let agents = ws.join("agents.md");
+            if !agents.exists() {
+                std::fs::write(&agents, "\
+# Active Agents
+
+Agents register here with their current task. Update when you start a new task.
+
+| Pane | Name | Current Task | Status |
+|------|------|-------------|--------|
+")?;
+            }
+
             println!("{}", ws.display());
         }
 
@@ -531,6 +587,51 @@ fn main() -> Result<()> {
                 zellij::reset_color(&pane)?;
             } else {
                 zellij::set_color(&pane, fg.as_deref(), bg.as_deref())?;
+            }
+        }
+
+        Cmd::Timer { seconds, label, cancel } => {
+            if !zellij::hub_available() {
+                bail!("timer requires the rz-hub plugin (RZ_HUB=1 not set)");
+            }
+
+            if let Some(timer_id) = cancel {
+                let resp = zellij::pipe_to_hub(
+                    "action=cancel_timer",
+                    &[("timer_id", &timer_id.to_string())],
+                    None,
+                )?;
+                let parsed = serde_json::from_str::<serde_json::Value>(&resp).ok();
+                if parsed.as_ref().and_then(|v| v.get("ok")?.as_bool()) == Some(true) {
+                    eprintln!("cancelled timer {timer_id}");
+                } else {
+                    let err = parsed
+                        .and_then(|v| v.get("error")?.as_str().map(String::from))
+                        .unwrap_or_else(|| "unknown error".into());
+                    bail!("cancel failed: {err}");
+                }
+            } else {
+                let seconds = seconds.unwrap();
+                let target = sender_id(None);
+                let secs_str = seconds.to_string();
+                let resp = zellij::pipe_to_hub(
+                    "action=timer",
+                    &[("target", target.as_str()), ("seconds", &secs_str)],
+                    Some(&label),
+                )?;
+                let timer_id = serde_json::from_str::<serde_json::Value>(&resp)
+                    .ok()
+                    .and_then(|v| v.get("data")?.get("timer_id")?.as_u64());
+                match timer_id {
+                    Some(id) => println!("timer {id} set for {seconds}s"),
+                    None => {
+                        let err = serde_json::from_str::<serde_json::Value>(&resp)
+                            .ok()
+                            .and_then(|v| v.get("error")?.as_str().map(String::from))
+                            .unwrap_or_else(|| "unknown error".into());
+                        bail!("timer failed: {err}");
+                    }
+                }
             }
         }
     }

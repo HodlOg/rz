@@ -30,6 +30,7 @@ pub enum MessageKind {
     Ping,
     Pong,
     Error { message: String },
+    Timer { label: String },
 }
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);

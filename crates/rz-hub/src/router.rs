@@ -25,7 +25,12 @@ struct PipeResponse {
 
 /// Handle an inbound pipe message with name "rz".
 /// Caller has already verified `pipe_message.name == "rz"`.
-pub fn handle_pipe(registry: &mut AgentRegistry, msg: &PipeMessage) {
+pub fn handle_pipe(
+    registry: &mut AgentRegistry,
+    msg: &PipeMessage,
+    timers: &mut Vec<crate::PendingTimer>,
+    next_timer_id: &mut u64,
+) {
     let action = match msg.args.get("action") {
         Some(a) => a.as_str(),
         None => {
@@ -42,6 +47,8 @@ pub fn handle_pipe(registry: &mut AgentRegistry, msg: &PipeMessage) {
         "list" => handle_list(registry, msg),
         "status" => handle_status(registry, msg),
         "ping" => handle_ping(registry, msg),
+        "timer" => handle_timer(registry, msg, timers, next_timer_id),
+        "cancel_timer" => handle_cancel_timer(msg, timers),
         unknown => respond_error(msg, &format!("unknown action: {unknown}")),
     }
 }
@@ -265,6 +272,100 @@ fn handle_ping(registry: &mut AgentRegistry, msg: &PipeMessage) {
         }
         respond_ok(msg, None);
     }
+}
+
+fn handle_timer(
+    registry: &mut AgentRegistry,
+    msg: &PipeMessage,
+    timers: &mut Vec<crate::PendingTimer>,
+    next_timer_id: &mut u64,
+) {
+    let target_raw = match msg.args.get("target") {
+        Some(v) => v.as_str(),
+        None => {
+            respond_error(msg, "missing required arg: target");
+            return;
+        }
+    };
+    let seconds_str = match msg.args.get("seconds") {
+        Some(v) => v.as_str(),
+        None => {
+            respond_error(msg, "missing required arg: seconds");
+            return;
+        }
+    };
+    let seconds: f64 = match seconds_str.parse() {
+        Ok(v) if v > 0.0 => v,
+        _ => {
+            respond_error(msg, &format!("invalid seconds: {seconds_str}"));
+            return;
+        }
+    };
+    let label = msg.payload.clone().unwrap_or_default();
+
+    let target_pane = match resolve_target(registry, target_raw) {
+        Some(id) => id,
+        None => {
+            respond_error(msg, &format!("unknown target: {target_raw}"));
+            return;
+        }
+    };
+
+    let pane_id = match target_pane {
+        PaneId::Terminal(id) => id,
+        PaneId::Plugin(_) => {
+            respond_error(msg, "timer target must be a terminal pane");
+            return;
+        }
+    };
+
+    let id = *next_timer_id;
+    *next_timer_id += 1;
+
+    timers.push(crate::PendingTimer {
+        id,
+        pane_id,
+        label,
+        seconds,
+    });
+
+    set_timeout(seconds);
+
+    respond_ok(msg, Some(serde_json::json!({ "timer_id": id })));
+}
+
+fn handle_cancel_timer(
+    msg: &PipeMessage,
+    timers: &mut Vec<crate::PendingTimer>,
+) {
+    let id_str = match msg.args.get("timer_id") {
+        Some(v) => v.as_str(),
+        None => {
+            respond_error(msg, "missing required arg: timer_id");
+            return;
+        }
+    };
+    let id: u64 = match id_str.parse() {
+        Ok(v) => v,
+        Err(_) => {
+            respond_error(msg, &format!("invalid timer_id: {id_str}"));
+            return;
+        }
+    };
+
+    let before = timers.len();
+    timers.retain(|t| t.id != id);
+    if timers.len() < before {
+        respond_ok(msg, Some(serde_json::json!({ "cancelled": id })));
+    } else {
+        respond_error(msg, &format!("timer {id} not found"));
+    }
+}
+
+/// Deliver a Timer message to a terminal pane (called from update() on Event::Timer).
+pub fn deliver_timer(pane_id: u32, label: &str) {
+    let envelope = Envelope::new("hub", MessageKind::Timer { label: label.to_string() });
+    deliver(&envelope, PaneId::Terminal(pane_id));
 }
 
 // ---------------------------------------------------------------------------

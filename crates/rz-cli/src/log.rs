@@ -55,6 +55,9 @@ pub fn format_message(envelope: &Envelope) -> String {
         MessageKind::Error { message } => {
             return format!("[{h:02}:{m:02}:{s:02}] {}> error: {message}", envelope.from);
         }
+        MessageKind::Timer { label } => {
+            return format!("[{h:02}:{m:02}:{s:02}] {}> timer: {label}", envelope.from);
+        }
     };
 
     format!("[{h:02}:{m:02}:{s:02}] {}> {text}", envelope.from)

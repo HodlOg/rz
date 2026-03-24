@@ -38,6 +38,14 @@ A shared workspace is available at `{ws}/shared/`.
 Write large outputs (research, code drafts, logs) there instead of
 inlining them in messages. Reference the file path in your message, e.g.:
 `{rz_path} send 0 "findings at {ws}/shared/research.md"`
+
+### Project Files
+
+The workspace has coordination files that all agents should use:
+
+- **`{ws}/goals.md`** — READ this when you start. It describes session goals. Add sub-goals as you discover them.
+- **`{ws}/context.md`** — UPDATE this with important decisions, discoveries, and context as you work.
+- **`{ws}/agents.md`** — UPDATE this with your pane ID, name, and current task when you start or switch tasks.
 "#
         )
     } else {

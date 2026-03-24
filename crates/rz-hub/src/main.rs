@@ -4,10 +4,19 @@ use zellij_tile::prelude::*;
 mod registry;
 mod router;
 
+pub struct PendingTimer {
+    pub id: u64,
+    pub pane_id: u32,
+    pub label: String,
+    pub seconds: f64,
+}
+
 struct RzHub {
     registry: registry::AgentRegistry,
     plugin_id: u32,
     dirty: bool,
+    timers: Vec<PendingTimer>,
+    next_timer_id: u64,
 }
 
 impl Default for RzHub {
@@ -16,6 +25,8 @@ impl Default for RzHub {
             registry: registry::AgentRegistry::default(),
             plugin_id: 0,
             dirty: false,
+            timers: Vec::new(),
+            next_timer_id: 1,
         }
     }
 }
@@ -33,6 +44,7 @@ impl ZellijPlugin for RzHub {
         subscribe(&[
             EventType::PaneUpdate,
             EventType::PermissionRequestResult,
+            EventType::Timer,
         ]);
 
         let ids = get_plugin_ids();
@@ -50,6 +62,23 @@ impl ZellijPlugin for RzHub {
                     .update_from_pane_manifest(&manifest, self.plugin_id);
                 self.dirty = true;
             }
+            Event::Timer(elapsed) => {
+                // Find the timer(s) whose delay matches the elapsed value.
+                // set_timeout fires with the exact seconds value we passed.
+                let elapsed_secs = elapsed as f64;
+                let mut fired = Vec::new();
+                self.timers.retain(|t| {
+                    if (t.seconds - elapsed_secs).abs() < 0.01 {
+                        fired.push((t.pane_id, t.label.clone()));
+                        false
+                    } else {
+                        true
+                    }
+                });
+                for (pane_id, label) in fired {
+                    router::deliver_timer(pane_id, &label);
+                }
+            }
             Event::PermissionRequestResult(_) => {}
             _ => {}
         }
@@ -60,7 +89,12 @@ impl ZellijPlugin for RzHub {
         if pipe_message.name != "rz" {
             return false;
         }
-        router::handle_pipe(&mut self.registry, &pipe_message);
+        router::handle_pipe(
+            &mut self.registry,
+            &pipe_message,
+            &mut self.timers,
+            &mut self.next_timer_id,
+        );
         self.dirty = matches!(
             pipe_message.args.get("action").map(|s| s.as_str()),
             Some("register" | "unregister")

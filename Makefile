@@ -6,7 +6,7 @@ PLUGIN_DIR := $(HOME)/.config/zellij/plugins
 .PHONY: build wasm install clean
 
 build:
-	cargo build --release
+	cargo build --release -p rz-cli -p rz-protocol
 
 wasm:
 	RUSTC=$(RUSTC) cargo build --release --target $(WASM_TARGET) -p rz-hub
