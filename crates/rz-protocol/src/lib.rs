@@ -56,6 +56,12 @@ impl Envelope {
         self
     }
 
+    /// Conditionally set `ref` if `Some`.
+    pub fn maybe_with_ref(mut self, r: Option<String>) -> Self {
+        self.r#ref = r;
+        self
+    }
+
     /// Encode to wire format: `@@RZ:<json>`
     pub fn encode(&self) -> eyre::Result<String> {
         let json = serde_json::to_string(self)?;

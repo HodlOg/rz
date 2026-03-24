@@ -5,8 +5,10 @@
 
 pub mod bootstrap;
 pub mod log;
-pub mod protocol;
 pub mod status;
 pub mod zellij;
 
-pub use protocol::{Envelope, MessageKind, SENTINEL};
+/// Re-export the protocol crate so downstream code can use `rz_cli::protocol::*`.
+pub use rz_protocol as protocol;
+
+pub use rz_protocol::{Envelope, MessageKind, SENTINEL};

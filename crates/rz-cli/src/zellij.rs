@@ -181,6 +181,52 @@ pub fn own_pane_id() -> Result<String> {
 }
 
 // ---------------------------------------------------------------------------
+// Hub (plugin pipe)
+// ---------------------------------------------------------------------------
+
+const HUB_PLUGIN: &str = "file:~/.config/zellij/plugins/rz-hub.wasm";
+
+/// Send a pipe message to the rz-hub plugin and return its JSON response.
+///
+/// Runs: `zellij pipe --plugin <hub> --name rz --args 'k=v,...' -- 'payload'`
+/// The hub responds via `cli_pipe_output`, which becomes stdout here.
+pub fn pipe_to_hub(action: &str, args: &[(&str, &str)], payload: Option<&str>) -> Result<String> {
+    let mut parts = vec![action.to_string()];
+    for (k, v) in args {
+        parts.push(format!("{k}={v}"));
+    }
+    let args_str = parts.join(",");
+
+    let mut cli_args = vec![
+        "pipe",
+        "--plugin", HUB_PLUGIN,
+        "--name", "rz",
+        "--args", &args_str,
+    ];
+    if let Some(p) = payload {
+        cli_args.push("--");
+        cli_args.push(p);
+    }
+
+    let output = Command::new("zellij").args(&cli_args).output()?;
+    if !output.status.success() {
+        bail!(
+            "zellij pipe failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+/// Check if hub routing is enabled.
+///
+/// Returns true only if `RZ_HUB=1` is set. We don't auto-detect because
+/// `zellij pipe` auto-launches the plugin and blocks on the permission prompt.
+pub fn hub_available() -> bool {
+    std::env::var("RZ_HUB").map(|v| v == "1").unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
 // Internal
 // ---------------------------------------------------------------------------
 

@@ -306,7 +306,44 @@ fn main() -> Result<()> {
                 if wait.is_some() {
                     bail!("--wait requires protocol mode (cannot use with --raw)");
                 }
+            } else if !raw && zellij::hub_available() {
+                // Route through the hub plugin via zellij pipe.
+                let from = sender_id(from.as_deref());
+                let mut args = vec![("target", pane.as_str()), ("from", from.as_str())];
+                if let Some(r) = r#ref.as_deref() {
+                    args.push(("ref", r));
+                }
+                let resp = zellij::pipe_to_hub("action=send", &args, Some(&message))?;
+
+                if let Some(timeout_secs) = wait {
+                    // Hub response contains the assigned message ID.
+                    let msg_id = serde_json::from_str::<serde_json::Value>(&resp)
+                        .ok()
+                        .and_then(|v| v.get("data")?.get("message_id")?.as_str().map(String::from))
+                        .unwrap_or_default();
+                    if msg_id.is_empty() {
+                        bail!("hub did not return a message_id");
+                    }
+                    let own = zellij::own_pane_id()?;
+                    let deadline = std::time::Instant::now()
+                        + std::time::Duration::from_secs(timeout_secs);
+                    loop {
+                        std::thread::sleep(std::time::Duration::from_millis(250));
+                        if std::time::Instant::now() >= deadline {
+                            bail!("timeout ({timeout_secs}s) — no reply to {msg_id}");
+                        }
+                        let scrollback = zellij::dump(&own)?;
+                        let messages = log::extract_messages(&scrollback);
+                        if let Some(reply) = messages.iter().rev().find(|m| {
+                            m.r#ref.as_deref() == Some(msg_id.as_str())
+                        }) {
+                            println!("{}", log::format_message(reply));
+                            break;
+                        }
+                    }
+                }
             } else {
+                // Fallback: direct paste (no hub available).
                 let mut envelope = Envelope::new(
                     sender_id(from.as_deref()),
                     MessageKind::Chat { text: message },
@@ -341,26 +378,41 @@ fn main() -> Result<()> {
 
         Cmd::Broadcast { message, raw } => {
             let from = sender_id(None);
-            let peers = zellij::list_pane_ids()?;
-            let own = zellij::own_pane_id().ok();
-            let mut sent = 0;
+            if !raw && zellij::hub_available() {
+                // Route broadcast through the hub plugin.
+                let resp = zellij::pipe_to_hub(
+                    "action=broadcast",
+                    &[("from", from.as_str())],
+                    Some(&message),
+                )?;
+                let delivered = serde_json::from_str::<serde_json::Value>(&resp)
+                    .ok()
+                    .and_then(|v| v.get("data")?.get("delivered")?.as_u64())
+                    .unwrap_or(0);
+                eprintln!("broadcast to {delivered} panes (via hub)");
+            } else {
+                // Fallback: direct paste to each pane.
+                let peers = zellij::list_pane_ids()?;
+                let own = zellij::own_pane_id().ok();
+                let mut sent = 0;
 
-            for peer in &peers {
-                if own.as_deref() == Some(peer) {
-                    continue;
+                for peer in &peers {
+                    if own.as_deref() == Some(peer) {
+                        continue;
+                    }
+                    if raw {
+                        zellij::send(peer, &message)?;
+                    } else {
+                        let envelope = Envelope::new(
+                            &from,
+                            MessageKind::Chat { text: message.clone() },
+                        );
+                        zellij::send(peer, &envelope.encode()?)?;
+                    }
+                    sent += 1;
                 }
-                if raw {
-                    zellij::send(peer, &message)?;
-                } else {
-                    let envelope = Envelope::new(
-                        &from,
-                        MessageKind::Chat { text: message.clone() },
-                    );
-                    zellij::send(peer, &envelope.encode()?)?;
-                }
-                sent += 1;
+                eprintln!("broadcast to {sent} panes");
             }
-            eprintln!("broadcast to {sent} panes");
         }
 
         Cmd::List => {
