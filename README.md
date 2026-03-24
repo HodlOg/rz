@@ -158,14 +158,9 @@ The hub uses `set_timeout()` — no polling. When the timer fires, the agent rec
 
 ## The self-improving loop
 
-Human designs the architecture and system — agents write the code. The human is not a product manager handing off feature requests; they're actively involved in the technical design, trade-offs, and abstractions. Agents handle implementation, testing, and auditing — coordinating through `rz` itself.
+Zellij's pane model gives you both high autonomy and high oversight — agents work independently in their panes while every scrollback is one `rz dump` away. The human operates at the architectural level, steering direction and messaging any agent directly. Agents handle implementation, design details, auditing, and coordination — spawning their own sub-agents when needed.
 
-1. Human designs the system and key abstractions
-2. Orchestrator agent decomposes into tasks, spawns specialists via `rz spawn`
-3. Agents implement, test, and audit each other — coordinating via `rz send`
-4. New version is installed mid-session; agents use what they just built
-
-In a single session, 10+ agents collaborated to build the workspace restructure, WASM plugin, timer system, and code audit — all communicating through the tool they were building.
+In a single session, 10+ agents built the workspace restructure, WASM plugin, timer system, and code audit — communicating through the tool they were building, improving it as they used it.
 
 ## License
 
