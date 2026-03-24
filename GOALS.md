@@ -24,3 +24,10 @@ Minimal, CLI-native multi-agent communication over Zellij. Agents talk via pane 
 - [ ] Message persistence: hub stores recent messages, queryable history
 - [ ] Acknowledgements: delivery confirmation
 - [ ] Rate limiting: prevent runaway agents from flooding
+- [ ] tmux backend: abstract transport layer so rz works with tmux (send-keys/capture-pane) not just Zellij
+- [ ] Raw socket transport: for non-terminal-multiplexer environments, direct TCP/Unix socket communication
+- [ ] Pre-built hub binaries: GitHub releases with .wasm artifacts, rz init auto-downloads
+- [ ] Package manager support: AUR, brew, nix
+
+## Acknowledgments
+rz is built on [Zellij](https://zellij.dev/) — its pane abstraction, WASM plugin system, and pipe IPC are the foundation that makes lightweight, zero-config agent communication possible.

@@ -22,6 +22,13 @@ Hub uses raw PTY write which doesn't trigger bracketed paste mode.
 Works for @@RZ: envelopes but could cause issues with multi-line
 payloads or special characters in message text.
 
+### Hub installation friction
+Users must build the WASM plugin from source (`cargo build --target wasm32-wasip1`)
+or manually download the `.wasm` artifact and place it in the right path. No binary
+distribution exists. This is the main barrier to adoption for non-Rust users.
+Planned fix: GitHub releases with pre-built `.wasm` artifacts, and `rz init`
+auto-downloads the matching hub version.
+
 ## Resolved
 - ~~Hub routing blocks on pipe~~ → Fixed: pipe by name, not URL
 - ~~Messages don't auto-submit~~ → Fixed: use \r (CR) instead of \n

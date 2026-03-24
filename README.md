@@ -14,6 +14,19 @@ cargo install rz-cli
 
 Requires [Zellij](https://zellij.dev) 0.42+.
 
+**Hub plugin** (optional, enables name-based routing and timers):
+
+```bash
+# Option 1: Pre-built from GitHub releases
+curl -L https://github.com/HodlOg/rz/releases/latest/download/rz-hub.wasm \
+  -o ~/.config/zellij/plugins/rz-hub.wasm
+
+# Option 2: Build from source
+make install  # builds WASM and copies to ~/.config/zellij/plugins/
+```
+
+Then add to your Zellij config and set `RZ_HUB=1`.
+
 ## Quick start
 
 ```bash
@@ -50,6 +63,10 @@ rz timer 60 "check build status"
 
 The core insight: LLMs already know how to use CLIs. Give them `rz send` and `rz spawn`, and multi-agent coordination emerges from conversation. No frameworks, no SDKs, no orchestration graphs — just a thin communication layer over Zellij panes.
 
+### Standing on Zellij
+
+`rz` is thin glue — [Zellij](https://zellij.dev) does the heavy lifting. Pane management, the WASM plugin system, `pipe` IPC, `write_to_pane_id` delivery, and `dump-screen` for reading output are all Zellij primitives. `rz` adds a messaging protocol, agent bootstrap, and a CLI that LLMs can use without documentation. Without Zellij's abstractions, this would be a much larger project.
+
 ### Architecture
 
 ```
@@ -66,9 +83,11 @@ The core insight: LLMs already know how to use CLIs. Give them `rz send` and `rz
 └──────────┘
 ```
 
-**Direct mode** (default): `rz send` uses `zellij action paste` + CR to write messages to panes. Works everywhere, no setup.
+**Direct mode** (default): `rz send` uses `zellij action paste` + CR to write messages to panes. Works everywhere, no setup. This is the only backend today.
 
 **Hub mode** (`RZ_HUB=1`): Messages route through the `rz-hub` WASM plugin via `zellij pipe`. The hub maintains an agent registry, supports name-based routing, and delivers via `write_to_pane_id`. Add to your Zellij config:
+
+> **Future:** Planned backends include tmux (for tmux users) and raw socket transport for non-terminal-multiplexer environments.
 
 ```kdl
 load_plugins {
