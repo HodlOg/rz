@@ -5,9 +5,6 @@ edition = "2024"
 license = "MIT OR Apache-2.0"
 description = "Zellij WASM plugin for rz message routing"
 
-[lib]
-crate-type = ["cdylib"]
-
 [dependencies]
 rz-protocol = { path = "../rz-protocol" }
 serde = { version = "1", features = ["derive"] }

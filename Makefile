@@ -14,7 +14,7 @@ wasm:
 install: build wasm
 	cargo install --path crates/rz-cli
 	mkdir -p $(PLUGIN_DIR)
-	cp target/$(WASM_TARGET)/release/rz_hub.wasm $(PLUGIN_DIR)/
+	cp target/$(WASM_TARGET)/release/rz-hub.wasm $(PLUGIN_DIR)/
 
 clean:
 	cargo clean

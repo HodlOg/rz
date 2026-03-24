@@ -184,7 +184,11 @@ pub fn own_pane_id() -> Result<String> {
 // Hub (plugin pipe)
 // ---------------------------------------------------------------------------
 
-const HUB_PLUGIN: &str = "file:~/.config/zellij/plugins/rz-hub.wasm";
+/// Resolve the hub plugin URL, expanding ~ to $HOME.
+fn hub_plugin_url() -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "~".into());
+    format!("file:{home}/.config/zellij/plugins/rz-hub.wasm")
+}
 
 /// Send a pipe message to the rz-hub plugin and return its JSON response.
 ///
@@ -196,10 +200,11 @@ pub fn pipe_to_hub(action: &str, args: &[(&str, &str)], payload: Option<&str>) -
         parts.push(format!("{k}={v}"));
     }
     let args_str = parts.join(",");
+    let plugin_url = hub_plugin_url();
 
     let mut cli_args = vec![
         "pipe",
-        "--plugin", HUB_PLUGIN,
+        "--plugin", &plugin_url,
         "--name", "rz",
         "--args", &args_str,
     ];
