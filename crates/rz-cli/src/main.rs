@@ -594,7 +594,7 @@ _Fill in the session's primary objective._
 
         Cmd::Timer { seconds, label, cancel } => {
             if !zellij::hub_available() {
-                bail!("timer requires the rz-hub plugin (RZ_HUB=1 not set)");
+                bail!("timer requires the rz-hub plugin (not detected — is it in load_plugins?)");
             }
 
             if let Some(timer_id) = cancel {

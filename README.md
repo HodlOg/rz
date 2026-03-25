@@ -25,7 +25,15 @@ curl -L https://github.com/HodlOg/rz/releases/latest/download/rz-hub.wasm \
 make install  # builds WASM and copies to ~/.config/zellij/plugins/
 ```
 
-Then add to your Zellij config and set `RZ_HUB=1`.
+Then add to your Zellij config:
+
+```kdl
+load_plugins {
+    "file:~/.config/zellij/plugins/rz-hub.wasm"
+}
+```
+
+`rz` auto-detects the hub — no environment variables needed.
 
 ## Quick start
 
@@ -85,7 +93,7 @@ The core insight: LLMs already know how to use CLIs. Give them `rz send` and `rz
 
 **Direct mode** (default): `rz send` uses `zellij action paste` + CR to write messages to panes. Works everywhere, no setup. This is the only backend today.
 
-**Hub mode** (`RZ_HUB=1`): Messages route through the `rz-hub` WASM plugin via `zellij pipe`. The hub maintains an agent registry, supports name-based routing, and delivers via `write_to_pane_id`. Add to your Zellij config:
+**Hub mode** (auto-detected): Messages route through the `rz-hub` WASM plugin via `zellij pipe`. The hub maintains an agent registry, supports name-based routing, and delivers via `write_to_pane_id`. Add to your Zellij config:
 
 > **Future:** Planned backends include tmux (for tmux users) and raw socket transport for non-terminal-multiplexer environments.
 

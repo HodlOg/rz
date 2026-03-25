@@ -220,12 +220,60 @@ pub fn pipe_to_hub(action: &str, args: &[(&str, &str)], payload: Option<&str>) -
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-/// Check if hub routing is enabled.
+/// Check if hub routing is available.
 ///
-/// Returns true only if `RZ_HUB=1` is set. We don't auto-detect because
-/// `zellij pipe` auto-launches the plugin and blocks on the permission prompt.
+/// Priority: `RZ_HUB=1` forces on, `RZ_HUB=0` forces off.  Otherwise we
+/// auto-detect by sending a quick `action=ping` pipe to the hub plugin.  The
+/// result is cached for the lifetime of the process so the probe runs at most
+/// once.
 pub fn hub_available() -> bool {
-    std::env::var("RZ_HUB").map(|v| v == "1").unwrap_or(false)
+    use std::sync::OnceLock;
+
+    // Explicit override takes precedence.
+    if let Ok(v) = std::env::var("RZ_HUB") {
+        return v == "1";
+    }
+
+    // Must be inside Zellij.
+    if std::env::var("ZELLIJ").is_err() {
+        return false;
+    }
+
+    static RESULT: OnceLock<bool> = OnceLock::new();
+    *RESULT.get_or_init(probe_hub)
+}
+
+/// Try a lightweight ping to the hub plugin with a 2-second timeout.
+///
+/// If the plugin is loaded (via `load_plugins`), the response is near-instant.
+/// If it isn't loaded, `zellij pipe` may block waiting for a subscriber — the
+/// timeout catches that case.
+fn probe_hub() -> bool {
+    let mut child = match Command::new("zellij")
+        .args(["pipe", "--name", "rz", "--args", "action=ping"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return status.success(),
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return false;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(_) => return false,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

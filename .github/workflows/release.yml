@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  wasm:
+    name: Build WASM plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-wasip1
+      - run: cargo build --release --target wasm32-wasip1 -p rz-hub
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rz-hub-wasm
+          path: target/wasm32-wasip1/release/rz-hub.wasm
+
+  cli:
+    name: Build CLI (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: rz-x86_64-linux
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact: rz-aarch64-linux
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            artifact: rz-x86_64-macos
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact: rz-aarch64-macos
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
+      - run: cargo build --release --target ${{ matrix.target }} -p rz-cli
+      - name: Package binary
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/rz dist/
+          tar czf ${{ matrix.artifact }}.tar.gz -C dist rz
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}.tar.gz
+
+  release:
+    name: Create GitHub Release
+    needs: [wasm, cli]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Prepare release assets
+        run: |
+          mkdir -p release
+          cp artifacts/rz-hub-wasm/rz-hub.wasm release/
+          cp artifacts/rz-x86_64-linux/rz-x86_64-linux.tar.gz release/
+          cp artifacts/rz-aarch64-linux/rz-aarch64-linux.tar.gz release/
+          cp artifacts/rz-x86_64-macos/rz-x86_64-macos.tar.gz release/
+          cp artifacts/rz-aarch64-macos/rz-aarch64-macos.tar.gz release/
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ github.ref_name }} \
+            --title "${{ github.ref_name }}" \
+            --generate-notes \
+            release/*
